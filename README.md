@@ -34,5 +34,5 @@ An OpenEnv environment for AI supply chain crisis management.
 
 \- GET /state
 
-\- GET /healths
+\- GET /health
 
