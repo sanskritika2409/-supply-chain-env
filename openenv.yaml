@@ -1,16 +1,16 @@
 name: supply-chain-env
 version: "1.0"
-description: Supply chain crisis management environment for the Meta PyTorch Hackathon
+description: Supply chain crisis management environment
 tasks:
   - id: risk_identification
-    description: Identify and flag at-risk orders in the supply chain
+    description: Identify and flag at-risk orders
     max_steps: 8
   - id: inventory_reallocation
     description: Reallocate inventory to prevent stockouts
-    max_steps: 8
+    max_steps: 12
   - id: crisis_recovery
-    description: Recover supply chain operations after a disruption
-    max_steps: 8
+    description: Recover supply chain after disruptions
+    max_steps: 20
 entrypoint: app.py
 inference: inference.py
-port: 8000
+port: 7860
