@@ -5,9 +5,9 @@ import urllib.request
 import urllib.error
 from openai import OpenAI
 
-HF_TOKEN     = os.getenv("HF_TOKEN", "")
+HF_TOKEN = os.getenv("HF_TOKEN", "")
 API_BASE_URL = "https://router.huggingface.co/v1"
-MODEL_NAME   = "Qwen/Qwen2.5-72B-Instruct"
+MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
 
 TASKS = ["risk_identification", "inventory_reallocation", "crisis_recovery"]
@@ -19,53 +19,61 @@ Action types: flag_at_risk, transfer_inventory, expedite_supplier, fulfill_order
 No extra text - JSON only."""
 
 
-# ── Logging helpers ──────────────────────────────────────────────────────────
-
 def log_start(task, model):
-    print(f"[START] task={task} model={model}", flush=True)
+    print("[START] task=" + task + " model=" + model, flush=True)
+
 
 def log_step(step, action, reward, done, error=None):
-    print(f"[STEP] step={step} action={action} reward={round(reward,2)} "
-          f"done={str(done).lower()} error={error or 'null'}", flush=True)
+    print("[STEP] step=" + str(step) + " action=" + action +
+          " reward=" + str(round(reward, 2)) + " done=" + str(done).lower() +
+          " error=" + str(error or "null"), flush=True)
+
 
 def log_end(success, steps, score, rewards):
-    print(f"[END] success={str(success).lower()} steps={steps} "
-          f"score={round(score,3)}", flush=True)
+    print("[END] success=" + str(success).lower() + " steps=" + str(steps) +
+          " score=" + str(round(score, 3)), flush=True)
 
 
-# ── Network helpers ──────────────────────────────────────────────────────────
-
-def env_post(path, payload=None, timeout=30):
-    """POST to env server; returns parsed JSON or raises on failure."""
-    data = json.dumps(payload).encode() if payload is not None else b""
-    req = urllib.request.Request(
-        ENV_BASE_URL + path,
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
-
-
-def wait_for_server(retries=15, delay=3):
-    """Poll /health until the env server responds."""
-    print(f"[INFO] Waiting for env server at {ENV_BASE_URL} ...", flush=True)
-    for attempt in range(1, retries + 1):
+def wait_for_server(base_url, retries=15, delay=2):
+    """Wait until the env server is reachable."""
+    for i in range(retries):
         try:
-            req = urllib.request.Request(ENV_BASE_URL + "/health", method="GET")
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with urllib.request.urlopen(base_url + "/health", timeout=5) as r:
                 if r.status == 200:
-                    print("[INFO] Env server ready.", flush=True)
+                    print("[INFO] Server is ready.", flush=True)
                     return True
         except Exception as e:
-            print(f"[INFO] Attempt {attempt}/{retries} - not ready yet: {e}", flush=True)
-        time.sleep(delay)
-    print("[ERROR] Env server never became ready.", flush=True)
+            print(f"[INFO] Waiting for server... attempt {i+1}/{retries}: {e}", flush=True)
+            time.sleep(delay)
+    print("[ERROR] Server did not become ready in time.", flush=True)
     return False
 
 
-# ── LLM action selection ─────────────────────────────────────────────────────
+def http_post(url, data=None, timeout=30):
+    """Safe HTTP POST with full error handling. Returns parsed JSON or None."""
+    try:
+        payload = json.dumps(data).encode() if data is not None else b""
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        print(f"[WARN] HTTP {e.code} on POST {url}: {e.reason}", flush=True)
+        return None
+    except urllib.error.URLError as e:
+        print(f"[WARN] URLError on POST {url}: {e.reason}", flush=True)
+        return None
+    except json.JSONDecodeError as e:
+        print(f"[WARN] JSON decode error on POST {url}: {e}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[WARN] Unexpected error on POST {url}: {e}", flush=True)
+        return None
+
 
 def get_action(client, observation, step):
     try:
@@ -74,8 +82,7 @@ def get_action(client, observation, step):
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",
-                 "content": f"Step {step}. State:\n{obs_str}\nWhat is your next action?"}
+                {"role": "user", "content": "Step " + str(step) + ". State:\n" + obs_str + "\nWhat is your next action?"}
             ],
             temperature=0.3,
             max_tokens=512,
@@ -87,45 +94,46 @@ def get_action(client, observation, step):
                 text = text[4:]
         return json.loads(text.strip())
     except Exception as e:
-        print(f"[WARN] get_action failed: {e}", flush=True)
+        print("[WARN] get_action error: " + str(e), flush=True)
         return {"action_type": "submit_final", "parameters": {}, "reasoning": "error fallback"}
 
-
-# ── Task runner ──────────────────────────────────────────────────────────────
 
 def run_task(client, task_id):
     log_start(task_id, MODEL_NAME)
 
-    try:
-        obs = env_post(f"/reset?task_id={task_id}")
-    except Exception as e:
-        print(f"[ERROR] /reset failed for task '{task_id}': {e}", flush=True)
+    # Reset the environment - fully wrapped
+    obs = http_post(ENV_BASE_URL + "/reset?task_id=" + task_id)
+    if obs is None:
+        print(f"[ERROR] Failed to reset task {task_id}, skipping.", flush=True)
         log_end(False, 0, 0.0, [])
         return 0.0
 
-    rewards     = []
+    rewards = []
     final_score = 0.0
-    done        = False
-    max_steps   = obs.get("max_steps", 8)
+    done = False
+    max_steps = obs.get("max_steps", 8)
 
     for step in range(1, max_steps + 1):
         if done:
             break
 
-        action      = get_action(client, obs, step)
+        action = get_action(client, obs, step)
         action_type = action.get("action_type", "unknown")
 
+        result = http_post(ENV_BASE_URL + "/step", data=action)
+        if result is None:
+            log_step(step, action_type, 0.0, True, "step request failed")
+            break
+
         try:
-            result     = env_post("/step", action)
             reward_val = result["reward"]["value"]
-            done       = result["done"]
-            obs        = result["observation"]
+            done = result["done"]
+            obs = result["observation"]
             if done:
                 final_score = reward_val
             rewards.append(reward_val)
             log_step(step, action_type, reward_val, done)
-        except Exception as e:
-            print(f"[ERROR] /step failed at step {step}: {e}", flush=True)
+        except (KeyError, TypeError) as e:
             log_step(step, action_type, 0.0, True, str(e))
             break
 
@@ -133,23 +141,22 @@ def run_task(client, task_id):
     return final_score
 
 
-# ── Entry point ──────────────────────────────────────────────────────────────
-
 def main():
     print("Starting inference...", flush=True)
 
     if not HF_TOKEN:
-        print("[ERROR] HF_TOKEN environment variable is not set.", flush=True)
-        return  # exit 0 — not a code crash
+        print("ERROR: Set HF_TOKEN environment variable", flush=True)
+        return
 
-    if not wait_for_server(retries=15, delay=3):
-        print("[ERROR] Aborting: env server unreachable.", flush=True)
-        return  # exit 0
+    # Wait for the environment server to be ready before doing anything
+    if not wait_for_server(ENV_BASE_URL):
+        print("ERROR: Cannot reach environment server. Exiting.", flush=True)
+        return
 
     try:
         client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     except Exception as e:
-        print(f"[ERROR] Could not create LLM client: {e}", flush=True)
+        print(f"ERROR: Failed to initialize OpenAI client: {e}", flush=True)
         return
 
     scores = []
@@ -157,15 +164,18 @@ def main():
         try:
             score = run_task(client, task_id)
         except Exception as e:
-            print(f"[ERROR] Unexpected crash in run_task({task_id}): {e}", flush=True)
+            print(f"[ERROR] Unhandled error in task {task_id}: {e}", flush=True)
             score = 0.0
         scores.append(score)
-        print(f"[SUMMARY] task={task_id} score={round(score, 3)}", flush=True)
+        print("[SUMMARY] task=" + task_id + " score=" + str(round(score, 3)), flush=True)
 
-    avg = sum(scores) / len(scores) if scores else 0.0
-    print(f"[SUMMARY] average_score={round(avg, 3)}", flush=True)
-    # Script always exits with code 0 — no sys.exit(1) anywhere
+    if scores:
+        print("[SUMMARY] average_score=" + str(round(sum(scores) / len(scores), 3)), flush=True)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"[FATAL] Unhandled exception in main: {e}", flush=True)
+        raise  # re-raise so validator sees the traceback, but we've logged it
