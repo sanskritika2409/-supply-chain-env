@@ -1,0 +1,67 @@
+name: supply-chain-env
+version: "1.0.0"
+description: >
+  AI agent environment for real-world supply chain crisis management.
+  Agents act as supply chain coordinators responding to supplier failures,
+  warehouse damage, and transport disruptions under budget and time constraints.
+author: "your-hf-username"
+license: MIT
+tags:
+  - openenv
+  - supply-chain
+  - crisis-management
+  - real-world
+  - logistics
+
+tasks:
+  - id: risk_identification
+    description: "Identify at-risk orders after a supplier factory fire (Easy)"
+    difficulty: easy
+    max_steps: 8
+    scoring: f1_score
+
+  - id: inventory_reallocation
+    description: "Reallocate inventory before a warehouse floods (Medium)"
+    difficulty: medium
+    max_steps: 12
+    scoring: weighted_fulfillment_rate
+
+  - id: crisis_recovery
+    description: "Manage a multi-day supply chain crisis with 3 simultaneous disruptions (Hard)"
+    difficulty: hard
+    max_steps: 20
+    scoring: composite_0.5_fill_0.3_cost_0.2_speed
+
+observation_space:
+  type: object
+  fields:
+    - day: integer
+    - budget: float
+    - suppliers: list[Supplier]
+    - warehouses: list[Warehouse]
+    - orders: list[Order]
+    - disruptions: list[Disruption]
+    - task_description: string
+
+action_space:
+  type: object
+  action_types:
+    - flag_at_risk
+    - transfer_inventory
+    - expedite_supplier
+    - fulfill_order
+    - cancel_order
+    - advance_day
+    - submit_final
+
+reward:
+  range: [0.0, 1.0]
+  type: dense
+  description: "Partial credit at each step + final episode score"
+
+endpoints:
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+  tasks: GET /tasks
+  health: GET /health
