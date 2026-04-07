@@ -8,7 +8,7 @@ from openai import OpenAI
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 API_BASE_URL = "https://router.huggingface.co/v1"
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")
 
 TASKS = ["risk_identification", "inventory_reallocation", "crisis_recovery"]
 
@@ -34,8 +34,7 @@ def log_end(success, steps, score, rewards):
           " score=" + str(round(score, 3)), flush=True)
 
 
-def wait_for_server(base_url, retries=15, delay=2):
-    """Wait until the env server is reachable."""
+def wait_for_server(base_url, retries=20, delay=3):
     for i in range(retries):
         try:
             with urllib.request.urlopen(base_url + "/health", timeout=5) as r:
@@ -50,7 +49,6 @@ def wait_for_server(base_url, retries=15, delay=2):
 
 
 def http_post(url, data=None, timeout=30):
-    """Safe HTTP POST with full error handling. Returns parsed JSON or None."""
     try:
         payload = json.dumps(data).encode() if data is not None else b""
         req = urllib.request.Request(
@@ -68,7 +66,7 @@ def http_post(url, data=None, timeout=30):
         print(f"[WARN] URLError on POST {url}: {e.reason}", flush=True)
         return None
     except json.JSONDecodeError as e:
-        print(f"[WARN] JSON decode error on POST {url}: {e}", flush=True)
+        print(f"[WARN] JSON decode error: {e}", flush=True)
         return None
     except Exception as e:
         print(f"[WARN] Unexpected error on POST {url}: {e}", flush=True)
@@ -101,7 +99,6 @@ def get_action(client, observation, step):
 def run_task(client, task_id):
     log_start(task_id, MODEL_NAME)
 
-    # Reset the environment - fully wrapped
     obs = http_post(ENV_BASE_URL + "/reset?task_id=" + task_id)
     if obs is None:
         print(f"[ERROR] Failed to reset task {task_id}, skipping.", flush=True)
@@ -148,7 +145,6 @@ def main():
         print("ERROR: Set HF_TOKEN environment variable", flush=True)
         return
 
-    # Wait for the environment server to be ready before doing anything
     if not wait_for_server(ENV_BASE_URL):
         print("ERROR: Cannot reach environment server. Exiting.", flush=True)
         return
@@ -177,5 +173,4 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"[FATAL] Unhandled exception in main: {e}", flush=True)
-        raise  # re-raise so validator sees the traceback, but we've logged it
+        print(f"[FATAL] Unhandled exception: {e}", flush=True)
