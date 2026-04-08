@@ -1,33 +1,67 @@
 import os
 import json
+import time
+import subprocess
 import urllib.request
-from typing import List, Optional
 from openai import OpenAI
 
-# ── Config ──────────────────────────────────────────────────────────────────
-HF_TOKEN = "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"
-API_BASE_URL = "https://router.huggingface.co/v1"
-MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
+HF_TOKEN = os.getenv("HF_TOKEN", "")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
+
 TASKS = ["risk_identification", "inventory_reallocation", "crisis_recovery"]
 
 SYSTEM_PROMPT = """You are a supply chain crisis manager AI agent.
 Respond ONLY with a valid JSON object like this:
 {"action_type": "flag_at_risk", "parameters": {"order_ids": ["O1"]}, "reasoning": "brief reason"}
-
 Action types: flag_at_risk, transfer_inventory, expedite_supplier, fulfill_order, cancel_order, advance_day, submit_final
-Read task_description carefully. No extra text — JSON only."""
+No extra text - JSON only."""
 
+_server_proc = None
 
-def log_start(task, model):
-    print(f"[START] task={task} model={model}", flush=True)
+def start_server_if_needed():
+    global _server_proc
+    if "localhost" not in ENV_BASE_URL:
+        return
+    for _ in range(3):
+        try:
+            urllib.request.urlopen(ENV_BASE_URL + "/health", timeout=2)
+            return
+        except:
+            pass
+    print("[DEBUG] Starting local server...", flush=True)
+    _server_proc = subprocess.Popen(
+        ["python", "app.py"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    for _ in range(30):
+        try:
+            urllib.request.urlopen(ENV_BASE_URL + "/health", timeout=1)
+            print("[DEBUG] Server ready.", flush=True)
+            return
+        except:
+            time.sleep(1)
+    raise RuntimeError("Server failed to start after 30s")
+
+def stop_server():
+    global _server_proc
+    if _server_proc:
+        _server_proc.terminate()
+        _server_proc = None
+
+def log_start(task, env, model):
+    print("[START] task=" + task + " env=" + env + " model=" + model, flush=True)
 
 def log_step(step, action, reward, done, error=None):
-    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error or 'null'}", flush=True)
+    print("[STEP] step=" + str(step) + " action=" + str(action) +
+          " reward=" + str(round(reward, 2)) + " done=" + str(done).lower() +
+          " error=" + str(error or "null"), flush=True)
 
 def log_end(success, steps, score, rewards):
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={','.join(f'{r:.2f}' for r in rewards)}", flush=True)
-
+    print("[END] success=" + str(success).lower() + " steps=" + str(steps) +
+          " score=" + str(round(score, 3)), flush=True)
 
 def get_action(client, observation, step):
     try:
@@ -36,7 +70,7 @@ def get_action(client, observation, step):
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Step {step}. State:\n{obs_str}\nWhat is your next action?"}
+                {"role": "user", "content": "Step " + str(step) + ". State:\n" + obs_str + "\nWhat is your next action?"}
             ],
             temperature=0.3,
             max_tokens=512,
@@ -48,21 +82,23 @@ def get_action(client, observation, step):
                 text = text[4:]
         return json.loads(text.strip())
     except Exception as e:
-        print(f"  [WARN] get_action error: {e}", flush=True)
+        print("[WARN] " + str(e), flush=True)
         return {"action_type": "submit_final", "parameters": {}, "reasoning": "error fallback"}
 
-
 def run_task(client, task_id):
-    log_start(task_id, MODEL_NAME)
-
-    # Reset
-    req = urllib.request.Request(
-        f"{ENV_BASE_URL}/reset?task_id={task_id}",
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req) as r:
-        obs = json.loads(r.read())
+    log_start(task_id, "supply-chain-env", MODEL_NAME)
+    try:
+        req = urllib.request.Request(
+            ENV_BASE_URL + "/reset?task_id=" + task_id,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            obs = json.loads(r.read())
+    except Exception as e:
+        print("[ERROR] Could not reset env: " + str(e), flush=True)
+        log_end(False, 0, 0.0, [])
+        return 0.0
 
     rewards = []
     final_score = 0.0
@@ -74,16 +110,15 @@ def run_task(client, task_id):
             break
         action = get_action(client, obs, step)
         action_type = action.get("action_type", "unknown")
-
         data = json.dumps(action).encode()
         req = urllib.request.Request(
-            f"{ENV_BASE_URL}/step",
+            ENV_BASE_URL + "/step",
             data=data,
             method="POST",
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req) as r:
+            with urllib.request.urlopen(req, timeout=30) as r:
                 result = json.loads(r.read())
             reward_val = result["reward"]["value"]
             done = result["done"]
@@ -99,17 +134,23 @@ def run_task(client, task_id):
     log_end(final_score >= 0.3, len(rewards), final_score, rewards)
     return final_score
 
-
 def main():
     print("Starting inference...", flush=True)
-    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
-    scores = []
-    for task_id in TASKS:
-        score = run_task(client, task_id)
-        scores.append(score)
-        print(f"[SUMMARY] task={task_id} score={score:.3f}", flush=True)
-    print(f"[SUMMARY] average_score={sum(scores)/len(scores):.3f}", flush=True)
-
+    if not HF_TOKEN:
+        print("ERROR: Set HF_TOKEN environment variable", flush=True)
+        return
+    try:
+        start_server_if_needed()
+        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+        scores = []
+        for task_id in TASKS:
+            score = run_task(client, task_id)
+            scores.append(score)
+            print("[SUMMARY] task=" + task_id + " score=" + str(round(score, 3)), flush=True)
+        avg = sum(scores) / len(scores) if scores else 0.0
+        print("[SUMMARY] average_score=" + str(round(avg, 3)), flush=True)
+    finally:
+        stop_server()
 
 if __name__ == "__main__":
     main()

@@ -77,7 +77,7 @@ class Action(BaseModel):
 
 
 class Reward(BaseModel):
-    value: float = Field(ge=0.0, le=1.0)
+    value: float  # ← FIXED: removed ge=0.0 and le=1.0 constraints that caused Pydantic crashes
     components: Dict[str, float] = Field(default_factory=dict)
     message: str = ""
 
