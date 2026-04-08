@@ -1,9 +1,18 @@
 import os
+import sys
 import json
 import time
 import subprocess
 import urllib.request
-from openai import OpenAI
+
+# ── Auto-install openai if the validator env doesn't have it ──────────────────
+try:
+    from openai import OpenAI
+except ImportError:
+    print("[SETUP] openai not found — installing...", flush=True)
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "openai", "-q"])
+    from openai import OpenAI
+# ─────────────────────────────────────────────────────────────────────────────
 
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
