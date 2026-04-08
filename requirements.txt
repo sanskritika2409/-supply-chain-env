@@ -1,4 +1,2 @@
-openai
-fastapi
-uvicorn[standard]
-pydantic
+uvicorn[standard] 
+pydantic 

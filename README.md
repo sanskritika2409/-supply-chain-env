@@ -1,81 +1,59 @@
-# 📦 SupplyChain-Env — AI Agent Benchmark Environment
+# 🏭 SupplyChain-Env
 
-> An OpenEnv-compatible AI benchmark environment simulating **supply chain crisis scenarios**
+**An OpenEnv environment for AI supply chain crisis management**
 
----
+## Why This Matters
+Supply chain disruptions cost the global economy $4 trillion in 2021 alone (COVID). 
+This environment trains AI agents to respond to real crises: supplier failures, 
+warehouse damage, and transport delays — under budget and time pressure.
 
-## 🧠 What is this?
+## Tasks
 
-SupplyChain-Env is a custom AI agent evaluation environment that simulates real-world supply chain disruptions. AI agents are tested on their ability to identify risks, reallocate inventory, and recover from crises — with a custom reward/scoring system to measure performance.
+| Task | Difficulty | Description | Baseline Score |
+|------|-----------|-------------|----------------|
+| `risk_identification` | Easy | Identify at-risk orders after supplier fire | ~0.75 |
+| `inventory_reallocation` | Medium | Reallocate inventory before warehouse floods | ~0.45 |
+| `crisis_recovery` | Hard | 7-day multi-disruption crisis management | ~0.25 |
 
----
+## Action Space
+| Action | Parameters | Description |
+|--------|-----------|-------------|
+| `flag_at_risk` | `order_ids: list` | Mark orders as at-risk |
+| `transfer_inventory` | `from_warehouse_id, to_warehouse_id, product, quantity` | Move stock |
+| `expedite_supplier` | `supplier_id` | Pay $2000 to reactivate supplier |
+| `fulfill_order` | `order_id` | Ship an order if inventory available |
+| `cancel_order` | `order_id` | Cancel (penalty for high priority) |
+| `advance_day` | — | Move to next day (crisis_recovery only) |
+| `submit_final` | — | End episode and compute final score |
 
-## ✨ Features
+## Observation Space
+```json
+{
+  "day": 1,
+  "budget": 80000.0,
+  "suppliers": [...],
+  "warehouses": [...],
+  "orders": [...],
+  "disruptions": [...],
+  "task_description": "..."
+}
+```
 
-- ✅ 3 progressive challenge tasks (risk identification → inventory reallocation → crisis recovery)
-- ✅ Custom reward & scoring logic for AI agent evaluation
-- ✅ REST API endpoints via FastAPI for agent interaction
-- ✅ Docker containerization for reproducible environments
-- ✅ Compatible with OpenEnv / OpenAI Gym-style interfaces
-- ✅ Pydantic v2 data validation throughout
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Language | Python |
-| API | FastAPI |
-| Validation | Pydantic v2 |
-| Containerization | Docker |
-| Interface | OpenEnv-compatible REST API |
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.10+
-- Docker
-
-### Run locally
-
+## Setup
 ```bash
-# Clone the repo
-git clone https://github.com/sanskritika2409/SupplyChain-Env.git
-cd SupplyChain-Env
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Start the API server
-uvicorn main:app --reload
+uvicorn app:app --reload
 ```
 
-### Run with Docker
-
+## Run Baseline
 ```bash
-docker build -t supplychain-env .
-docker run -p 8000:8000 supplychain-env
+export HF_TOKEN=your_token
+export ENV_BASE_URL=http://localhost:8000
+python inference.py
 ```
 
-### API Docs
-Once running, visit `http://localhost:8000/docs` for interactive Swagger docs.
-
----
-
-## 🎯 Tasks
-
-| Task | Description | Difficulty |
-|---|---|---|
-| Task 1 | Risk Identification | Beginner |
-| Task 2 | Inventory Reallocation | Intermediate |
-| Task 3 | Crisis Recovery | Advanced |
-
----
-
-## 👩‍💻 Author
-
-**Sanskritika Awasthi**  
-[LinkedIn](https://www.linkedin.com/in/sanskritika-awasthi-9400592a6) | [GitHub](https://github.com/sanskritika2409)
+## Docker
+```bash
+docker build -t supply-chain-env .
+docker run -p 7860:7860 supply-chain-env
+```

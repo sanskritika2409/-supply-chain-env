@@ -2,11 +2,13 @@ from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
+
 class Priority(str, Enum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+
 
 class Supplier(BaseModel):
     id: str
@@ -16,6 +18,7 @@ class Supplier(BaseModel):
     is_active: bool = True
     stock: Dict[str, int] = {}
 
+
 class Warehouse(BaseModel):
     id: str
     name: str
@@ -23,6 +26,7 @@ class Warehouse(BaseModel):
     capacity: int
     inventory: Dict[str, int] = {}
     is_operational: bool = True
+
 
 class Order(BaseModel):
     id: str
@@ -36,6 +40,7 @@ class Order(BaseModel):
     is_fulfilled: bool = False
     is_flagged_at_risk: bool = False
 
+
 class Disruption(BaseModel):
     id: str
     disruption_type: str
@@ -43,6 +48,7 @@ class Disruption(BaseModel):
     affected_entity_id: str
     severity: float
     day_started: int
+
 
 class Observation(BaseModel):
     day: int
@@ -58,21 +64,30 @@ class Observation(BaseModel):
     steps_taken: int
     max_steps: int
 
+
 class Action(BaseModel):
-    action_type: str = Field(description="One of: flag_at_risk, transfer_inventory, expedite_supplier, cancel_order, fulfill_order, advance_day, submit_final")
+    action_type: str = Field(
+        description=(
+            "One of: flag_at_risk, transfer_inventory, expedite_supplier, "
+            "cancel_order, fulfill_order, advance_day, submit_final"
+        )
+    )
     parameters: Dict[str, Any] = Field(default_factory=dict)
     reasoning: Optional[str] = None
+
 
 class Reward(BaseModel):
     value: float = Field(ge=0.0, le=1.0)
     components: Dict[str, float] = Field(default_factory=dict)
     message: str = ""
 
+
 class StepResult(BaseModel):
     observation: Observation
     reward: Reward
     done: bool
     info: Dict[str, Any] = Field(default_factory=dict)
+
 
 class StateResult(BaseModel):
     task_id: str
