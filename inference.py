@@ -17,6 +17,10 @@ except ImportError:
 # Use API_KEY (validator injected) with fallback to HF_TOKEN
 API_KEY = os.environ["API_KEY"]
 API_BASE_URL = os.environ["API_BASE_URL"]
+<<<<<<< HEAD
+=======
+
+>>>>>>> 6dc6393 (Fix: use validator API_BASE_URL and API_KEY only)
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
 
