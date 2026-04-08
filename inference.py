@@ -14,7 +14,8 @@ except ImportError:
     from openai import OpenAI
 # ─────────────────────────────────────────────────────────────────────────────
 
-HF_TOKEN = os.getenv("HF_TOKEN", "")
+# Use API_KEY (validator injected) with fallback to HF_TOKEN
+API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
@@ -35,7 +36,6 @@ def start_server_if_needed():
         print("[DEBUG] External ENV_BASE_URL, skipping local server start.", flush=True)
         return
 
-    # Check if already running
     for _ in range(3):
         try:
             urllib.request.urlopen(ENV_BASE_URL + "/health", timeout=2)
@@ -44,7 +44,6 @@ def start_server_if_needed():
         except:
             pass
 
-    # Try to start app.py only if it exists
     if not os.path.exists("app.py"):
         print("[DEBUG] app.py not found — assuming validator provides the env.", flush=True)
         return
@@ -63,7 +62,6 @@ def start_server_if_needed():
         except:
             time.sleep(1)
 
-    # Don't raise — just warn and continue
     print("[WARN] Server did not start in 30s — continuing anyway.", flush=True)
 
 def stop_server():
@@ -157,12 +155,17 @@ def run_task(client, task_id):
 
 def main():
     print("Starting inference...", flush=True)
-    if not HF_TOKEN:
-        print("ERROR: Set HF_TOKEN environment variable", flush=True)
+    print("[DEBUG] API_BASE_URL=" + API_BASE_URL, flush=True)
+    print("[DEBUG] API_KEY set=" + str(bool(API_KEY)), flush=True)
+
+    if not API_KEY:
+        print("ERROR: Set API_KEY or HF_TOKEN environment variable", flush=True)
         return
+
     try:
         start_server_if_needed()
-        client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+        # Always use validator-provided API_BASE_URL and API_KEY
+        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
         scores = []
         for task_id in TASKS:
             score = run_task(client, task_id)
