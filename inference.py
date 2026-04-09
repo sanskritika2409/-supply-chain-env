@@ -17,10 +17,7 @@ except ImportError:
 # Use API_KEY (validator injected) with fallback to HF_TOKEN
 API_KEY = os.environ["API_KEY"]
 API_BASE_URL = os.environ["API_BASE_URL"]
-<<<<<<< HEAD
-=======
 
->>>>>>> 6dc6393 (Fix: use validator API_BASE_URL and API_KEY only)
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
 
@@ -84,7 +81,8 @@ def log_step(step, action, reward, done, error=None):
 
 def log_end(success, steps, score, rewards):
     print("[END] success=" + str(success).lower() + " steps=" + str(steps) +
-          " score=" + str(round(score, 3)), flush=True)
+          " score=" + str(round(score, 2)) +
+          " rewards=" + ",".join(str(round(r, 2)) for r in rewards), flush=True)
 
 def get_action(client, observation, step):
     try:
@@ -174,7 +172,7 @@ def main():
         for task_id in TASKS:
             score = run_task(client, task_id)
             scores.append(score)
-            print("[SUMMARY] task=" + task_id + " score=" + str(round(score, 3)), flush=True)
+            print("[SUMMARY] task=" + task_id + " score=" + str(round(score, 2)), flush=True)
         avg = sum(scores) / len(scores) if scores else 0.0
         print("[SUMMARY] average_score=" + str(round(avg, 3)), flush=True)
     finally:
