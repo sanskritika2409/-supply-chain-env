@@ -431,7 +431,7 @@ class SupplyChainEnv:
         precision = tp / max(tp + fp, 1)
         recall = tp / max(tp + fn, 1)
         f1 = 2 * precision * recall / max(precision + recall, 1e-6)
-        return Reward(value=round(f1, 4),
+        return Reward(value=round(max(0.001, min(0.999, f1)), 4),
                       components={"precision": precision, "recall": recall, "f1": f1},
                       message=f"F1={f1:.3f} | TP={tp} FP={fp} FN={fn}")
 
@@ -447,7 +447,7 @@ class SupplyChainEnv:
         cost_used = self._template["budget"] - self._state["budget"]
         budget_efficiency = 1.0 - (cost_used / max(self._template["budget"], 1))
         score = 0.7 * fulfillment + 0.3 * budget_efficiency
-        return Reward(value=round(min(score, 1.0), 4),
+        return Reward(value=round(max(0.001, min(0.999, score)), 4),
                       components={"fulfillment": fulfillment, "budget_efficiency": budget_efficiency},
                       message=f"Weighted fulfillment={fulfillment:.3f}, cost_eff={budget_efficiency:.3f}")
 
@@ -463,7 +463,7 @@ class SupplyChainEnv:
             if o.id in self._state["fulfilled_orders"] and o.deadline_day >= self._state["day"]:
                 speed_bonus += 1.0 / max(total, 1)
         score = (0.5 * fulfillment_rate + 0.3 * cost_efficiency + 0.2 * speed_bonus)
-        return Reward(value=round(min(score, 1.0), 4),
+        return Reward(value=round(max(0.001, min(0.999, score)), 4),
                       components={"fulfillment_rate": fulfillment_rate,
                                   "cost_efficiency": cost_efficiency,
                                   "speed_bonus": speed_bonus},
