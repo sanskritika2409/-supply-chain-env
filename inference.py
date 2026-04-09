@@ -19,7 +19,7 @@ API_KEY = os.environ["API_KEY"]
 API_BASE_URL = os.environ["API_BASE_URL"]
 
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")
 
 TASKS = ["risk_identification", "inventory_reallocation", "crisis_recovery"]
 
