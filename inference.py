@@ -1,34 +1,16 @@
 import os
-import sys
 import json
 import time
 import subprocess
 import urllib.request
+from openai import OpenAI
 
-<<<<<<< HEAD
-# ── Auto-install openai if the validator env doesn't have it ──────────────────
-try:
-    from openai import OpenAI
-except ImportError:
-    print("[SETUP] openai not found — installing...", flush=True)
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "openai", "-q"])
-    from openai import OpenAI
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Use API_KEY (validator injected) with fallback to HF_TOKEN
-API_KEY = os.environ["API_KEY"]
-API_BASE_URL = os.environ["API_BASE_URL"]
-
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")
-=======
 # MUST use the injected variables exactly like this
 API_BASE_URL = os.environ["API_BASE_URL"]
 API_KEY = os.environ["API_KEY"]
 
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")
 
 TASKS = ["risk_identification", "inventory_reallocation", "crisis_recovery"]
 
@@ -46,31 +28,15 @@ def start_server_if_needed():
     global _server_proc
 
     if "localhost" not in ENV_BASE_URL:
-<<<<<<< HEAD
-        print("[DEBUG] External ENV_BASE_URL, skipping local server start.", flush=True)
-=======
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
         return
 
     for _ in range(3):
         try:
             urllib.request.urlopen(ENV_BASE_URL + "/health", timeout=2)
-<<<<<<< HEAD
-            print("[DEBUG] Server already running.", flush=True)
-=======
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
             return
         except:
             pass
 
-<<<<<<< HEAD
-    if not os.path.exists("app.py"):
-        print("[DEBUG] app.py not found — assuming validator provides the env.", flush=True)
-        return
-
-    print("[DEBUG] Starting local server...", flush=True)
-=======
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
     _server_proc = subprocess.Popen(
         ["python", "app.py"],
         stdout=subprocess.DEVNULL,
@@ -84,12 +50,8 @@ def start_server_if_needed():
         except:
             time.sleep(1)
 
-<<<<<<< HEAD
-    print("[WARN] Server did not start in 30s — continuing anyway.", flush=True)
-=======
     raise RuntimeError("Server failed to start")
 
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
 
 def stop_server():
     global _server_proc
@@ -97,21 +59,6 @@ def stop_server():
         _server_proc.terminate()
         _server_proc = None
 
-<<<<<<< HEAD
-def log_start(task, env, model):
-    print("[START] task=" + task + " env=" + env + " model=" + model, flush=True)
-
-def log_step(step, action, reward, done, error=None):
-    print("[STEP] step=" + str(step) + " action=" + str(action) +
-          " reward=" + str(round(reward, 2)) + " done=" + str(done).lower() +
-          " error=" + str(error or "null"), flush=True)
-
-def log_end(success, steps, score, rewards):
-    print("[END] success=" + str(success).lower() + " steps=" + str(steps) +
-          " score=" + str(round(score, 2)) +
-          " rewards=" + ",".join(str(round(r, 2)) for r in rewards), flush=True)
-=======
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
 
 def get_action(client, observation, step):
     obs_str = json.dumps(observation)
@@ -145,10 +92,6 @@ def get_action(client, observation, step):
 
 
 def run_task(client, task_id):
-<<<<<<< HEAD
-    log_start(task_id, "supply-chain-env", MODEL_NAME)
-=======
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
     try:
         req = urllib.request.Request(
             ENV_BASE_URL + "/reset?task_id=" + task_id,
@@ -195,24 +138,13 @@ def run_task(client, task_id):
         except:
             break
 
+    final_score = max(0.01, min(0.99, final_score))
     return final_score
 
 
 def main():
     print("Starting inference...", flush=True)
-    print("[DEBUG] API_BASE_URL=" + API_BASE_URL, flush=True)
-    print("[DEBUG] API_KEY set=" + str(bool(API_KEY)), flush=True)
 
-<<<<<<< HEAD
-    if not API_KEY:
-        print("ERROR: Set API_KEY or HF_TOKEN environment variable", flush=True)
-        return
-
-    try:
-        start_server_if_needed()
-        # Always use validator-provided API_BASE_URL and API_KEY
-        client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-=======
     client = OpenAI(
         base_url=os.environ["API_BASE_URL"],
         api_key=os.environ["API_KEY"]
@@ -221,21 +153,14 @@ def main():
     try:
         start_server_if_needed()
 
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
         scores = []
 
         for task_id in TASKS:
             score = run_task(client, task_id)
             scores.append(score)
-<<<<<<< HEAD
-            print("[SUMMARY] task=" + task_id + " score=" + str(round(score, 2)), flush=True)
-        avg = sum(scores) / len(scores) if scores else 0.0
-        print("[SUMMARY] average_score=" + str(round(avg, 3)), flush=True)
-=======
 
         print("Average score:", sum(scores) / len(scores), flush=True)
 
->>>>>>> ebc1969 (fix: correct OpenEnv port 7860)
     finally:
         stop_server()
 
