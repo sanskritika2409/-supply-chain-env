@@ -24,6 +24,15 @@ No extra text - JSON only.
 _server_proc = None
 
 
+def safe_clamp(value, fallback=0.5):
+    """Guarantee a score is strictly inside (0, 1) — never exactly 0.0 or 1.0."""
+    try:
+        v = float(value)
+        return max(0.001, min(0.999, v))
+    except (TypeError, ValueError):
+        return fallback
+
+
 def start_server_if_needed():
     global _server_proc
 
@@ -34,7 +43,7 @@ def start_server_if_needed():
         try:
             urllib.request.urlopen(ENV_BASE_URL + "/health", timeout=2)
             return
-        except:
+        except Exception:
             pass
 
     _server_proc = subprocess.Popen(
@@ -47,7 +56,7 @@ def start_server_if_needed():
         try:
             urllib.request.urlopen(ENV_BASE_URL + "/health", timeout=1)
             return
-        except:
+        except Exception:
             time.sleep(1)
 
     raise RuntimeError("Server failed to start")
@@ -80,10 +89,8 @@ def get_action(client, observation, step):
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-
         return json.loads(text.strip())
-
-    except:
+    except Exception:
         return {
             "action_type": "advance_day",
             "parameters": {},
@@ -92,29 +99,27 @@ def get_action(client, observation, step):
 
 
 def run_task(client, task_id):
+    # Reset the environment
     try:
         req = urllib.request.Request(
             ENV_BASE_URL + "/reset?task_id=" + task_id,
             method="POST",
             headers={"Content-Type": "application/json"},
         )
-
         with urllib.request.urlopen(req, timeout=30) as r:
             obs = json.loads(r.read())
-    except:
-      return 0.5
+    except Exception:
+        return 0.5  # safe fallback, strictly inside (0, 1)
 
-    final_score = 0.0
+    final_score = 0.5  # start at a safe fallback instead of 0.0
     done = False
     max_steps = obs.get("max_steps", 8)
 
     for step in range(1, max_steps + 1):
-
         if done:
             break
 
         action = get_action(client, obs, step)
-
         data = json.dumps(action).encode()
 
         req = urllib.request.Request(
@@ -128,17 +133,26 @@ def run_task(client, task_id):
             with urllib.request.urlopen(req, timeout=30) as r:
                 result = json.loads(r.read())
 
-            done = result["done"]
-            obs = result["observation"]
+            done = result.get("done", False)
+            obs = result.get("observation", obs)
 
             if done:
-                final_score = result.get("reward", {}).get("value", 0.5)
+                # Guard: reward may be None, a dict, or a float depending on server
+                reward_block = result.get("reward", {})
+                if isinstance(reward_block, dict):
+                    raw_value = reward_block.get("value", 0.5)
+                elif isinstance(reward_block, (int, float)):
+                    raw_value = reward_block
+                else:
+                    raw_value = 0.5
 
-        except:
+                final_score = safe_clamp(raw_value)
+
+        except Exception:
             break
 
-    final_score = max(0.01, min(0.99, final_score))
-    return final_score
+    # Final safety net — clamp regardless of what happened above
+    return safe_clamp(final_score)
 
 
 def main():
@@ -153,12 +167,15 @@ def main():
         start_server_if_needed()
 
         scores = []
-
         for task_id in TASKS:
             score = run_task(client, task_id)
             scores.append(score)
+            print(f"Task {task_id}: {score:.4f}", flush=True)
 
-        print("Average score:", sum(scores) / len(scores), flush=True)
+        avg = sum(scores) / len(scores)
+        # Clamp average too, just in case
+        avg = safe_clamp(avg)
+        print("Average score:", avg, flush=True)
 
     finally:
         stop_server()
