@@ -1,6 +1,5 @@
 import copy
-import random
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 from models import (
     Action, Disruption, Observation, Order, Priority,
@@ -59,7 +58,7 @@ TASK_EASY = {
               supplier_id="S1", warehouse_id="W1"),
     ],
     "budget": 100_000.0,
-    "at_risk_order_ids": {"O1", "O3", "O5"},   # ground truth
+    "at_risk_order_ids": {"O1", "O3", "O5"},
 }
 
 TASK_MEDIUM = {
@@ -136,7 +135,7 @@ TASK_HARD = {
                    description="South Hub storm damage — 50% capacity lost.",
                    affected_entity_id="W3", severity=0.5, day_started=1),
         Disruption(id="D3", disruption_type="transport_delay",
-                   description="Port strike delays all East→West transfers by 2 days.",
+                   description="Port strike delays all East->West transfers by 2 days.",
                    affected_entity_id="W1", severity=0.4, day_started=1),
     ],
     "suppliers": [
@@ -191,6 +190,16 @@ class SupplyChainEnv:
         self._state: Dict[str, Any] = {}
         self.reset()
 
+    # ── Safety clamp — every reward value MUST go through this ─────────────
+
+    @staticmethod
+    def _clamp(v: float) -> float:
+        """Guarantee reward is strictly inside (0, 1) — never exactly 0.0 or 1.0."""
+        try:
+            return round(max(0.001, min(0.999, float(v))), 4)
+        except (TypeError, ValueError):
+            return 0.5
+
     # ── OpenEnv core API ────────────────────────────────────────────────────
 
     def reset(self) -> Observation:
@@ -224,7 +233,6 @@ class SupplyChainEnv:
         self._state["steps_taken"] += 1
         reward, message = self._apply_action(action)
 
-        # Check termination
         done = (
             self._state["is_done"]
             or self._state["steps_taken"] >= self._state["max_steps"]
@@ -235,6 +243,13 @@ class SupplyChainEnv:
             final_reward = self._compute_final_score()
             reward = final_reward
             message = f"Episode complete. Final score: {final_reward.value:.3f}. {final_reward.message}"
+
+        # Final safety net — clamp the value one last time before it leaves the env
+        reward = Reward(
+            value=self._clamp(reward.value),
+            message=reward.message,
+            components=getattr(reward, "components", None),
+        )
 
         self._state["total_reward"] += reward.value
         obs = self._build_observation(message)
@@ -295,10 +310,12 @@ class SupplyChainEnv:
             precision = len(correct_flags) / max(len(self._state["flagged_order_ids"]), 1)
             recall = len(correct_flags) / max(len(ground_truth), 1)
             partial = 0.5 * (precision + recall) * 0.3
-            return Reward(value=max(0.001, min(0.999, min(partial, 0.3))),
-                          components={"precision": precision, "recall": recall},
-                          message=f"Flagged {len(flagged)} orders. {len(false_flags)} false positives so far."), \
-                   f"Flagged orders: {list(flagged)}"
+            return Reward(
+                value=self._clamp(min(partial, 0.3)),
+                components={"precision": precision, "recall": recall},
+                message=f"Flagged {len(flagged)} orders. {len(false_flags)} false positives so far."
+            ), f"Flagged orders: {list(flagged)}"
+
         return Reward(value=0.05, message="Orders flagged."), f"Flagged: {list(flagged)}"
 
     def _action_transfer(self, p: Dict) -> Tuple[Reward, str]:
@@ -315,8 +332,7 @@ class SupplyChainEnv:
         if not src or not dst:
             return Reward(value=0.001, message="Invalid warehouse IDs"), "Transfer failed: invalid warehouses."
         if src.inventory.get(product, 0) < qty:
-            available = src.inventory.get(product, 0)
-            qty = available
+            qty = src.inventory.get(product, 0)
         if qty <= 0:
             return Reward(value=0.001, message="Nothing to transfer"), "No inventory to transfer."
 
@@ -324,9 +340,11 @@ class SupplyChainEnv:
         dst.inventory[product] = dst.inventory.get(product, 0) + qty
         self._state["budget"] -= cost
         partial = min(qty / 100, 0.999) * 0.1
-        return Reward(value=max(0.001, partial), message=f"Transferred {qty} {product}",
-                      components={"transfer_partial": partial}), \
-               f"Moved {qty} {product} from {from_id} to {to_id}. Cost: ${cost:.0f}"
+        return Reward(
+            value=self._clamp(partial),
+            message=f"Transferred {qty} {product}",
+            components={"transfer_partial": partial}
+        ), f"Moved {qty} {product} from {from_id} to {to_id}. Cost: ${cost:.0f}"
 
     def _action_expedite(self, p: Dict) -> Tuple[Reward, str]:
         cost = 2000.0
@@ -344,9 +362,11 @@ class SupplyChainEnv:
             sup.stock[product] = sup.stock.get(product, 0) + 200
         self._state["budget"] -= cost
         self._state["expedited_suppliers"].add(supplier_id)
-        return Reward(value=0.15, message="Supplier expedited",
-                      components={"expedite_bonus": 0.15}), \
-               f"Expedited {sup.name}. Restocked +200 units each. Cost: ${cost:.0f}"
+        return Reward(
+            value=self._clamp(0.15),
+            message="Supplier expedited",
+            components={"expedite_bonus": 0.15}
+        ), f"Expedited {sup.name}. Restocked +200 units each. Cost: ${cost:.0f}"
 
     def _action_fulfill(self, p: Dict) -> Tuple[Reward, str]:
         order_id = p.get("order_id", "")
@@ -372,10 +392,11 @@ class SupplyChainEnv:
         priority_bonus = {Priority.CRITICAL: 0.25, Priority.HIGH: 0.15,
                           Priority.MEDIUM: 0.08, Priority.LOW: 0.03}[order.priority]
         day_bonus = max(0, (order.deadline_day - self._state["day"]) * 0.01)
-        reward_val = max(0.001, min(0.999, min(priority_bonus + day_bonus, 0.3)))
-        return Reward(value=reward_val, message=f"Order {order_id} fulfilled!",
-                      components={"priority_bonus": priority_bonus, "day_bonus": day_bonus}), \
-               f"✓ Fulfilled order {order_id} for {order.customer}"
+        return Reward(
+            value=self._clamp(min(priority_bonus + day_bonus, 0.3)),
+            message=f"Order {order_id} fulfilled!",
+            components={"priority_bonus": priority_bonus, "day_bonus": day_bonus}
+        ), f"Fulfilled order {order_id} for {order.customer}"
 
     def _action_cancel(self, p: Dict) -> Tuple[Reward, str]:
         order_id = p.get("order_id", "")
@@ -385,9 +406,11 @@ class SupplyChainEnv:
         self._state["cancelled_orders"].add(order_id)
         penalty = {Priority.CRITICAL: 0.2, Priority.HIGH: 0.1,
                    Priority.MEDIUM: 0.03, Priority.LOW: 0.0}[order.priority]
-        return Reward(value=0.001, message=f"Cancelled {order_id}, penalty {penalty:.2f}",
-                      components={"cancel_penalty": -penalty}), \
-               f"Cancelled order {order_id}. Priority penalty: {penalty:.2f}"
+        return Reward(
+            value=0.001,
+            message=f"Cancelled {order_id}, penalty {penalty:.2f}",
+            components={"cancel_penalty": -penalty}
+        ), f"Cancelled order {order_id}. Priority penalty: {penalty:.2f}"
 
     def _action_advance_day(self) -> Tuple[Reward, str]:
         if self.task_id != "crisis_recovery":
@@ -405,10 +428,11 @@ class SupplyChainEnv:
                     and o.id not in self._state["cancelled_orders"]
                     and o.priority == Priority.CRITICAL):
                 penalty += 0.05
-        reward_val = max(0.001, min(0.999, max(-penalty, -0.2) + 0.5))
-        return Reward(value=reward_val,
-                      message=f"Advanced to day {self._state['day']}. Penalty: {penalty:.2f}"), \
-               f"Day {self._state['day']} begins. Deadline penalties: {penalty:.2f}"
+        reward_val = self._clamp(max(-penalty, -0.2) + 0.5)
+        return Reward(
+            value=reward_val,
+            message=f"Advanced to day {self._state['day']}. Penalty: {penalty:.2f}"
+        ), f"Day {self._state['day']} begins. Deadline penalties: {penalty:.2f}"
 
     # ── Final scoring ────────────────────────────────────────────────────────
 
@@ -429,9 +453,11 @@ class SupplyChainEnv:
         precision = tp / max(tp + fp, 1)
         recall = tp / max(tp + fn, 1)
         f1 = 2 * precision * recall / max(precision + recall, 1e-6)
-        return Reward(value=round(max(0.001, min(0.999, f1)), 4),
-                      components={"precision": precision, "recall": recall, "f1": f1},
-                      message=f"F1={f1:.3f} | TP={tp} FP={fp} FN={fn}")
+        return Reward(
+            value=self._clamp(f1),
+            components={"precision": precision, "recall": recall, "f1": f1},
+            message=f"F1={f1:.3f} | TP={tp} FP={fp} FN={fn}"
+        )
 
     def _score_medium(self) -> Reward:
         weights = self._template.get("priority_weights", {})
@@ -445,26 +471,31 @@ class SupplyChainEnv:
         cost_used = self._template["budget"] - self._state["budget"]
         budget_efficiency = 1.0 - (cost_used / max(self._template["budget"], 1))
         score = 0.7 * fulfillment + 0.3 * budget_efficiency
-        return Reward(value=round(max(0.001, min(0.999, score)), 4),
-                      components={"fulfillment": fulfillment, "budget_efficiency": budget_efficiency},
-                      message=f"Weighted fulfillment={fulfillment:.3f}, cost_eff={budget_efficiency:.3f}")
+        return Reward(
+            value=self._clamp(score),
+            components={"fulfillment": fulfillment, "budget_efficiency": budget_efficiency},
+            message=f"Weighted fulfillment={fulfillment:.3f}, cost_eff={budget_efficiency:.3f}"
+        )
 
     def _score_hard(self) -> Reward:
         orders = self._state["orders"]
-        total, fulfilled = len(orders), len(self._state["fulfilled_orders"])
+        total = len(orders)
+        fulfilled = len(self._state["fulfilled_orders"])
         fulfillment_rate = fulfilled / max(total, 1)
         cost_used = self._template["budget"] - self._state["budget"]
-        cost_efficiency = 1.0 - min(cost_used / self._template["budget"], 1.0)
+        cost_efficiency = 1.0 - min(cost_used / max(self._template["budget"], 1.0), 1.0)
         speed_bonus = 0.0
         for o in self._state["orders"]:
             if o.id in self._state["fulfilled_orders"] and o.deadline_day >= self._state["day"]:
                 speed_bonus += 1.0 / max(total, 1)
-        score = (0.5 * fulfillment_rate + 0.3 * cost_efficiency + 0.2 * speed_bonus)
-        return Reward(value=round(max(0.001, min(0.999, score)), 4),
-                      components={"fulfillment_rate": fulfillment_rate,
-                                  "cost_efficiency": cost_efficiency,
-                                  "speed_bonus": speed_bonus},
-                      message=f"Fill={fulfillment_rate:.2f} CostEff={cost_efficiency:.2f} Speed={speed_bonus:.2f}")
+        score = 0.5 * fulfillment_rate + 0.3 * cost_efficiency + 0.2 * speed_bonus
+        return Reward(
+            value=self._clamp(score),
+            components={"fulfillment_rate": fulfillment_rate,
+                        "cost_efficiency": cost_efficiency,
+                        "speed_bonus": speed_bonus},
+            message=f"Fill={fulfillment_rate:.2f} CostEff={cost_efficiency:.2f} Speed={speed_bonus:.2f}"
+        )
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
